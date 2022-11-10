@@ -1,4 +1,4 @@
-# Building an Alpine docker image from scratch
+# Building an Alpine Docker image from scratch
 
 ## License
 
