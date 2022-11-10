@@ -1,0 +1,93 @@
+---
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  # https://www.alpinelinux.org/downloads/
+  ALPINE_VERSION: "3.16.2"
+  ALPINE_SHORT_VERSION:
+    sh: echo "{{.ALPINE_VERSION}}" | cut -f 1-2 -d '.'
+  ALPINE_ARCH:
+    sh: docker info 2>/dev/null | grep 'Architecture:' | cut -f 3 -d ' '
+  ALPINE_MINIROOTFS: "alpine-minirootfs-{{.ALPINE_VERSION}}-{{.ALPINE_ARCH}}.tar.gz"
+  ALPINE_URL: "http://dl-cdn.alpinelinux.org/alpine/v{{.ALPINE_SHORT_VERSION}}/releases/{{.ALPINE_ARCH}}"
+
+  DOCKER_USER: "dreknix"
+  DOCKER_REPO: "alpine-scratch"
+  DOCKER_IMAGE: "{{.DOCKER_USER}}/{{.DOCKER_REPO}}"
+  DOCKER_TAG: "{{.ALPINE_VERSION}}.1"
+
+  BUILD_ARGS:
+    --build-arg "ALPINE_VERSION={{.ALPINE_VERSION}}"
+    --build-arg "ALPINE_ARCH={{.ALPINE_ARCH}}"
+    --build-arg "VERSION={{.DOCKER_TAG}}"
+  BUILD_EXTRA_ARGS:
+
+tasks:
+
+  download:
+    internal: true
+    cmds:
+      - curl --progress-bar -f "{{.ALPINE_URL}}/{{.ALPINE_MINIROOTFS}}" -o "{{.ALPINE_MINIROOTFS}}"
+    status:
+      - test -f "{{.ALPINE_MINIROOTFS}}"
+
+  lint:
+    desc: Lint Dockerfile
+    cmds:
+      - cmd: hadolint Dockerfile
+    sources:
+      - Dockerfile
+
+  build:
+    internal: true
+    deps: [download, lint]
+    env:
+      DOCKER_BUILDKIT: 1
+    cmds:
+      - docker build
+            {{.BUILD_ARGS}}
+            {{.BUILD_EXTRA_ARGS}}
+            -t "{{.DOCKER_IMAGE}}:{{.DOCKER_TAG}}"
+            -t "{{.DOCKER_IMAGE}}:latest"
+            .
+
+  build:cache:
+    desc: Build Docker image (with cache)
+    cmds:
+      - task: build
+
+  build:no-cache:
+    desc: Build Docker image (without cache)
+    cmds:
+      - task: build
+        vars:
+          BUILD_EXTRA_ARGS: --no-cache
+
+  run:
+    desc: Run Docker container
+    deps: [build]
+    cmds:
+      - docker run --rm -it "{{.DOCKER_IMAGE}}:{{.DOCKER_TAG}}"
+
+  list:
+    desc: List Docker images and containers
+    cmds:
+      - docker image ls -a
+      - docker container ls -a
+
+  clean:
+    desc: Delete Docker containers and images
+    cmds:
+      - docker container ls -a --format "{{`{{.ID}}`}} {{`{{.Image}}`}}" |
+        grep "{{.DOCKER_IMAGE}}" |
+        awk '{ print $1 }' |
+        xargs --no-run-if-empty docker container rm --force
+      - docker image ls -a --format "{{`{{.ID}}`}}" "{{.DOCKER_IMAGE}}" |
+        uniq |
+        xargs --no-run-if-empty docker image rm --force
+      - docker image prune --force
+      - rm -f "{{.ALPINE_MINIROOTFS}}"
+
+...
